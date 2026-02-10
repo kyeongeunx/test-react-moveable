@@ -23,8 +23,6 @@
 /* 실제 타겟 */
 .target {
   position: absolute;
-  width: 100px;
-  height: 100px;
   background: lightblue;
   user-select: none;
 
@@ -33,16 +31,9 @@
 .target.dragging {
   transition: none;
 }
-
-/* 커스텀 선택 테두리 */
-.selection-ui {
-  position: absolute;
-  width: 100px;
-  height: 100px;
-  border: 2px solid #3b82f6;
-  box-sizing: border-box;
-  pointer-events: none;
-  z-index: 10;
+.target.selected {
+  outline: 2px solid #3b82f6;
+  outline-offset: -3px;
 }
 
 /* Moveable 기본 UI 숨기기 */
