@@ -66,6 +66,9 @@ function simpleReflow(items: any[], movedId: string) {
 }
 
 function App() {
+  const [previewTargets, setPreviewTargets] = useState<TargetData[] | null>(
+    null,
+  ); // onDrag 중인 미리보기 상태
   const [targets, setTargets] = useState<TargetData[]>([
     { id: "A", x: 0, y: 0 },
     { id: "B", x: 100, y: 0 },
@@ -80,6 +83,8 @@ function App() {
     ? targets.find((t) => t.id === selectedId)
     : null;
 
+  const renderTargets = previewTargets ?? targets;
+
   return (
     <div
       className="editor"
@@ -89,7 +94,7 @@ function App() {
         ["--grid-large" as any]: `${GRID_SIZE * 5 * SCALE}px`,
       }}
     >
-      {targets.map((t) => (
+      {renderTargets.map((t) => (
         <Target
           key={t.id}
           data={t}
@@ -118,17 +123,20 @@ function App() {
           target={targetRefs.current[selectedId!]}
           draggable
           throttleDrag={0}
-          onDrag={(e) => {
-            e.target.style.transform = e.transform;
+          onDragStart={(e) => {
+            e.target.classList.add("dragging");
           }}
-          onDragEnd={(e) => {
-            const [dx, dy] = e.lastEvent.beforeTranslate;
+          onDrag={(e) => {
+            const [dx, dy] = e.beforeTranslate;
 
-            // 1. 이동 의도 → cell 좌표
+            // 시각적 이동은 px 그대로 (부드러움 담당)
+            e.target.style.transform = `translate(${dx}px, ${dy}px)`;
+
+            // 1. 논리적 위치는 cell 단위로 변환
             const nextCellX = pxToCell(dx);
             const nextCellY = pxToCell(dy);
 
-            // 2. 현재 상태를 cell 단위로 변환
+            // 2. 현재 "진짜 레이아웃"을 cell로 변환
             const cellItems = targets.map((t) => ({
               id: t.id,
               x: pxToCell(t.x),
@@ -137,25 +145,44 @@ function App() {
               h: ITEM_H,
             }));
 
-            // 3. 이동된 아이템만 새 위치 반영
+            // 3. 이동 중인 아이템 반영
             const moved = cellItems.map((i) =>
               i.id === selectedId ? { ...i, x: nextCellX, y: nextCellY } : i,
             );
 
-            // 4. reflow
+            // 4. preview reflow 실행
             const reflowed = simpleReflow(moved, selectedId!);
 
-            // 5. px로 변환 후 state 반영
-            setTargets((prev) =>
-              prev.map((t) => {
-                const cell = reflowed.find((i) => i.id === t.id);
-                return {
-                  ...t,
-                  x: cellToPx(cell.x),
-                  y: cellToPx(cell.y),
-                };
-              }),
+            // 5. cell → px 변환해서 previewTargets 갱신
+            setPreviewTargets(
+              reflowed.map((c) => ({
+                id: c.id,
+                x: cellToPx(c.x),
+                y: cellToPx(c.y),
+              })),
             );
+          }}
+          onDragEnd={(e) => {
+            e.target.classList.remove("dragging");
+
+            // 1. 마지막 이동 의도(px)
+            const [dx, dy] = e.lastEvent.beforeTranslate;
+
+            // 2. 셀 좌표로 스냅
+            const snapCellX = pxToCell(dx);
+            const snapCellY = pxToCell(dy);
+
+            const snapPxX = cellToPx(snapCellX);
+            const snapPxY = cellToPx(snapCellY);
+
+            // 3. DOM을 셀 위치로 강제 스냅 - 자석 효과
+            e.target.style.transform = `translate(${snapPxX}px, ${snapPxY}px)`;
+
+            // 4. 실제 targets 업데이트
+            if (previewTargets) {
+              setTargets(previewTargets);
+              setPreviewTargets(null);
+            }
           }}
         />
       )}

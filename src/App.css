@@ -27,6 +27,11 @@
   height: 100px;
   background: lightblue;
   user-select: none;
+
+  transition: transform 0.2s ease;
+}
+.target.dragging {
+  transition: none;
 }
 
 /* 커스텀 선택 테두리 */
