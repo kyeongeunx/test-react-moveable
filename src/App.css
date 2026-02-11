@@ -1,23 +1,27 @@
 .editor {
   position: relative;
-  width: 100%;
-  height: 800px;
+  transform: translate(100px, 100px);
+  width: 800px;
+  height: 500px;
 
-  /* JS에서 내려준 값 */
-  --grid-size: 50px;
-  --grid-large: 250px;
+  /* grid 단위 */
+  --grid-small: 10px; /* 항상 고정 */
+  --grid-large: 100px; /* JS에서 덮어씀 */
 
   background-image:
     linear-gradient(to right, #e5e7eb 1px, transparent 1px),
     linear-gradient(to bottom, #e5e7eb 1px, transparent 1px),
-    linear-gradient(to right, #d1d5db 1px, transparent 1px),
-    linear-gradient(to bottom, #d1d5db 1px, transparent 1px);
+    linear-gradient(to right, #9ca3af 1.3px, transparent 1.3px),
+    linear-gradient(to bottom, #9ca3af 1.3px, transparent 1.3px);
 
   background-size:
-    var(--grid-size) var(--grid-size),
-    var(--grid-size) var(--grid-size),
+    var(--grid-small) var(--grid-small),
+    var(--grid-small) var(--grid-small),
     var(--grid-large) var(--grid-large),
     var(--grid-large) var(--grid-large);
+
+  border-right: 1.3px solid #9ca3af;
+  border-bottom: 1.3px solid #9ca3af;
 }
 
 /* 실제 타겟 */

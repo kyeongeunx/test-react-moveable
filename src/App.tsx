@@ -30,36 +30,6 @@ function isOverlapCell(a: TargetData, b: TargetData) {
  * items: cell 단위 레이아웃
  * movedId: 사용자가 이동한 아이템 id
  */
-// function simpleReflow(items: TargetData[], movedId: string) {
-//   const fixed = items.find((i) => i.id === movedId); // 이동된 아이템 = 기준(고정)
-//   const others = items.filter((i) => i.id !== movedId); // 나머지 아이템들
-
-//   // 위에 있던 것부터 -> 좌측에 있던 것부터 순서대로 재배치
-//   others.sort((a, b) => a.y - b.y || a.x - b.x);
-
-//   const placed = [fixed];
-
-//   for (const item of others) {
-//     let y = 0;
-
-//     while (true) {
-//       // 현재 item을 y 위치에 놓았을 때
-//       const test = { ...item, y };
-
-//       // 이미 놓인 것들과 겹치는지 검사
-//       const hit = placed.some((p) => isOverlapCell(test, p));
-
-//       if (!hit) {
-//         placed.push(test);
-//         break;
-//       }
-//       y += 1; // 겹치면 한 줄 아래로 이동
-//     }
-//   }
-
-//   return placed;
-// }
-
 function localPushReflow(items: TargetData[], movedId: string) {
   const map = new Map(items.map((i) => [i.id, { ...i }]));
   const moved = map.get(movedId)!;
@@ -90,28 +60,75 @@ function App() {
   ); // onDrag 중인 미리보기 상태
   const [targets, setTargets] = useState<TargetData[]>([
     { id: "A", x: 0, y: 0, w: 2, h: 2 },
-    { id: "B", x: 4, y: 1, w: 1, h: 2 },
-    { id: "C", x: 6, y: 1, w: 3, h: 3 },
+    { id: "B", x: 2, y: 1, w: 1, h: 2 },
+    { id: "C", x: 4, y: 1, w: 3, h: 3 },
   ]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
   const targetRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const resizeStartSize = useRef<{ w: number; h: number } | null>(null); // resize 시작 기준 cell 크기
+  const editorRef = useRef<HTMLDivElement>(null); // editor DOM
+  const lastClampedTranslate = useRef<{ x: number; y: number } | null>(null); // onDrag 중 마지막 클램프된 translate 값
 
   // 선택된 타겟 정보
   const selectedTarget = selectedId
     ? targets.find((t) => t.id === selectedId)
     : null;
 
+  // 렌더링할 타겟 목록 (드래그 중이면 previewTargets 사용)
   const renderTargets = previewTargets ?? targets;
+
+  // editor px -> cell
+  function getEditorBoundsCell() {
+    if (!editorRef.current) return null;
+
+    const { width, height } = editorRef.current.getBoundingClientRect();
+
+    return {
+      maxX: Math.floor(width / GRID_SIZE),
+      maxY: Math.floor(height / GRID_SIZE),
+    };
+  }
+
+  // 아이템을 editor 경계 내로 강제 클램핑
+  function clampToBounds(
+    item: TargetData,
+    bounds: { maxX: number; maxY: number },
+  ): TargetData {
+    return {
+      ...item,
+      x: Math.max(0, Math.min(item.x, bounds.maxX - item.w)),
+      y: Math.max(0, Math.min(item.y, bounds.maxY - item.h)),
+    };
+  }
+  // px 클램핑
+  function clampPx(value: number, min: number, max: number) {
+    return Math.max(min, Math.min(value, max));
+  }
+
+  // 경계 내 클램핑 + 리플로우 적용
+  function applyBoundsAndReflow(
+    items: TargetData[],
+    movedId: string,
+    bounds: { maxX: number; maxY: number },
+  ) {
+    // 1. 1차 clamp
+    const bounded = items.map((i) => clampToBounds(i, bounds));
+
+    // 2. reflow
+    const reflowed = localPushReflow(bounded, movedId);
+
+    // 3. 2차 clamp (밀림 결과 보정)
+    return reflowed.map((i) => clampToBounds(i, bounds));
+  }
 
   return (
     <div
+      ref={editorRef}
       className="editor"
       onClickCapture={() => setSelectedId(null)}
       style={{
-        ["--grid-size" as any]: `${GRID_SIZE * SCALE}px`,
-        ["--grid-large" as any]: `${GRID_SIZE * 5 * SCALE}px`,
+        ["--grid-large" as any]: `${GRID_SIZE * SCALE}px`,
       }}
     >
       {renderTargets.map((t) => (
@@ -142,44 +159,78 @@ function App() {
           onDrag={(e) => {
             const [dx, dy] = e.beforeTranslate;
 
-            // 시각적 이동은 px 그대로 (부드러움 담당)
-            e.target.style.transform = `translate(${dx}px, ${dy}px)`;
+            const bounds = editorRef.current!.getBoundingClientRect();
+            console.log("editor bounds:", bounds);
 
-            // 1. 논리적 위치는 cell 단위로 변환
-            const nextCellX = Math.round(dx / GRID_SIZE);
-            const nextCellY = Math.round(dy / GRID_SIZE);
+            const t = targets.find((t) => t.id === selectedId)!;
 
-            // 2. 이동 중인 아이템 반영
+            // 원래 크기 (px)
+            const widthPx = t.w * GRID_SIZE;
+            const heightPx = t.h * GRID_SIZE;
+
+            // 허용 가능한 이동 범위 (px)
+            const minDx = 0;
+            const maxDx = bounds.width - widthPx;
+            const minDy = 0;
+            const maxDy = bounds.height - heightPx;
+
+            // px 이동 clamp
+            const clampedDx = clampPx(dx, minDx, maxDx);
+            const clampedDy = clampPx(dy, minDy, maxDy);
+
+            // DragEnd를 위해 저장
+            lastClampedTranslate.current = { x: clampedDx, y: clampedDy };
+
+            // 시각적 이동 (px)
+            e.target.style.transform = `translate(${clampedDx}px, ${clampedDy}px)`;
+
+            // 1. px -> cell
+            const nextCellX = Math.round(clampedDx / GRID_SIZE);
+            const nextCellY = Math.round(clampedDy / GRID_SIZE);
+
+            const original = targets.find((t) => t.id === selectedId)!;
+            if (nextCellX === original.x && nextCellY === original.y) return;
+
+            // 2. drag 반영
             const moved = targets.map((i) =>
               i.id === selectedId ? { ...i, x: nextCellX, y: nextCellY } : i,
             );
 
-            // 3. preview reflow 실행
-            const reflowed = localPushReflow(moved, selectedId!);
+            // 3. clamp + reflow
+            const cellBounds = getEditorBoundsCell()!;
+            const result = applyBoundsAndReflow(moved, selectedId!, cellBounds);
 
-            // 4.  previewTargets 갱신
-            setPreviewTargets(reflowed);
+            // 4. previewTargets 갱신
+            setPreviewTargets(result);
           }}
           onDragEnd={(e) => {
             e.target.classList.remove("dragging");
 
-            // 1. 마지막 이동 의도(px)
-            const [dx, dy] = e.lastEvent.beforeTranslate;
+            const bounds = getEditorBoundsCell();
+            if (!bounds) return;
 
-            // 2. px → cell
+            const last = lastClampedTranslate.current;
+            if (!last) return;
+
+            // 마지막 이동 (px)
+            const { x: dx, y: dy } = last;
+
+            // 1. px → cell
             const snapCellX = Math.round(dx / GRID_SIZE);
             const snapCellY = Math.round(dy / GRID_SIZE);
 
-            // 3. cell → px (DOM 표현용)
-            const snapPxX = snapCellX * GRID_SIZE;
-            const snapPxY = snapCellY * GRID_SIZE;
+            // 2. DOM 강제 스냅 - 자석 효과
+            e.target.style.transform = `translate(
+              ${snapCellX * GRID_SIZE}px,
+              ${snapCellY * GRID_SIZE}px
+            )`;
 
-            // 4. DOM을 셀 위치로 강제 스냅 - 자석 효과
-            e.target.style.transform = `translate(${snapPxX}px, ${snapPxY}px)`;
-
-            // 5. 실제 targets 업데이트
+            // 3. 실제 targets 업데이트
             if (previewTargets) {
-              setTargets(previewTargets);
+              // commit 시에도 clamp 보장
+              const final = previewTargets.map((i) => clampToBounds(i, bounds));
+
+              setTargets(final);
               setPreviewTargets(null);
             }
           }}
@@ -190,49 +241,54 @@ function App() {
           onResize={(e) => {
             const { width, height } = e;
 
-            // 시각적 이동은 px 그대로 (부드러움 담당)
+            const bounds = getEditorBoundsCell();
+            if (!bounds) return;
+
+            // 시각적 이동 (px)
             e.target.style.width = `${width}px`;
             e.target.style.height = `${height}px`;
 
-            // 1. 논리적 위치는 cell 단위로 변환
+            // 1. px -> cell
             const nextCellW = Math.max(1, Math.round(width / GRID_SIZE));
             const nextCellH = Math.max(1, Math.round(height / GRID_SIZE));
 
             const start = resizeStartSize.current!;
             if (nextCellW === start.w && nextCellH === start.h) return;
 
-            // 2. 리사이징 중인 아이템 반영
+            // 2. resize 반영
             const resized = targets.map((t) =>
               t.id === selectedId ? { ...t, w: nextCellW, h: nextCellH } : t,
             );
 
-            // 3. preview reflow 실행
-            const reflowed = localPushReflow(resized, selectedId!);
+            // 3. clamp + reflow
+            const result = applyBoundsAndReflow(resized, selectedId!, bounds);
 
             // 4. previewTargets 갱신
-            setPreviewTargets(reflowed);
+            setPreviewTargets(result);
           }}
           onResizeEnd={(e) => {
             resizeStartSize.current = null;
 
-            // 1. 마지막 크기 의도(px)
+            const bounds = getEditorBoundsCell();
+            if (!bounds) return;
+
+            // 마지막 크기 (px)
             const { width, height } = e.lastEvent;
 
-            // 2. px → cell
+            // 1. px → cell
             const snapCellW = Math.max(1, Math.round(width / GRID_SIZE));
             const snapCellH = Math.max(1, Math.round(height / GRID_SIZE));
 
-            // 3. cell → px (DOM 표현용)
-            const snapPxW = snapCellW * GRID_SIZE;
-            const snapPxH = snapCellH * GRID_SIZE;
+            // 2. DOM 강제 스냅 - 자석 효과
+            e.target.style.width = `${snapCellW * GRID_SIZE}px`;
+            e.target.style.height = `${snapCellH * GRID_SIZE}px`;
 
-            // 4. DOM을 셀 크기로 강제 스냅 - 자석 효과
-            e.target.style.width = `${snapPxW}px`;
-            e.target.style.height = `${snapPxH}px`;
-
-            // 5. 실제 targets 업데이트
+            // 3. 실제 targets 업데이트
             if (previewTargets) {
-              setTargets(previewTargets);
+              // commit 시에도 clamp 보장
+              const final = previewTargets.map((i) => clampToBounds(i, bounds));
+
+              setTargets(final);
               setPreviewTargets(null);
             }
           }}
