@@ -96,6 +96,7 @@ function App() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
   const targetRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  const resizeStartSize = useRef<{ w: number; h: number } | null>(null); // resize 시작 기준 cell 크기
 
   // 선택된 타겟 정보
   const selectedTarget = selectedId
@@ -132,7 +133,9 @@ function App() {
         <Moveable
           target={targetRefs.current[selectedId!]}
           draggable
+          resizable
           throttleDrag={0}
+          throttleResize={0}
           onDragStart={(e) => {
             e.target.classList.add("dragging");
           }}
@@ -155,15 +158,7 @@ function App() {
             const reflowed = localPushReflow(moved, selectedId!);
 
             // 4.  previewTargets 갱신
-            setPreviewTargets(
-              reflowed.map((c) => ({
-                id: c.id,
-                x: c.x,
-                y: c.y,
-                w: c.w,
-                h: c.h,
-              })),
-            );
+            setPreviewTargets(reflowed);
           }}
           onDragEnd={(e) => {
             e.target.classList.remove("dragging");
@@ -181,6 +176,59 @@ function App() {
 
             // 4. DOM을 셀 위치로 강제 스냅 - 자석 효과
             e.target.style.transform = `translate(${snapPxX}px, ${snapPxY}px)`;
+
+            // 5. 실제 targets 업데이트
+            if (previewTargets) {
+              setTargets(previewTargets);
+              setPreviewTargets(null);
+            }
+          }}
+          onResizeStart={() => {
+            const t = targets.find((t) => t.id === selectedId)!;
+            resizeStartSize.current = { w: t.w, h: t.h };
+          }}
+          onResize={(e) => {
+            const { width, height } = e;
+
+            // 시각적 이동은 px 그대로 (부드러움 담당)
+            e.target.style.width = `${width}px`;
+            e.target.style.height = `${height}px`;
+
+            // 1. 논리적 위치는 cell 단위로 변환
+            const nextCellW = Math.max(1, Math.round(width / GRID_SIZE));
+            const nextCellH = Math.max(1, Math.round(height / GRID_SIZE));
+
+            const start = resizeStartSize.current!;
+            if (nextCellW === start.w && nextCellH === start.h) return;
+
+            // 2. 리사이징 중인 아이템 반영
+            const resized = targets.map((t) =>
+              t.id === selectedId ? { ...t, w: nextCellW, h: nextCellH } : t,
+            );
+
+            // 3. preview reflow 실행
+            const reflowed = localPushReflow(resized, selectedId!);
+
+            // 4. previewTargets 갱신
+            setPreviewTargets(reflowed);
+          }}
+          onResizeEnd={(e) => {
+            resizeStartSize.current = null;
+
+            // 1. 마지막 크기 의도(px)
+            const { width, height } = e.lastEvent;
+
+            // 2. px → cell
+            const snapCellW = Math.max(1, Math.round(width / GRID_SIZE));
+            const snapCellH = Math.max(1, Math.round(height / GRID_SIZE));
+
+            // 3. cell → px (DOM 표현용)
+            const snapPxW = snapCellW * GRID_SIZE;
+            const snapPxH = snapCellH * GRID_SIZE;
+
+            // 4. DOM을 셀 크기로 강제 스냅 - 자석 효과
+            e.target.style.width = `${snapPxW}px`;
+            e.target.style.height = `${snapPxH}px`;
 
             // 5. 실제 targets 업데이트
             if (previewTargets) {
